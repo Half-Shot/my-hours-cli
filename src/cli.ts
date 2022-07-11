@@ -1,37 +1,10 @@
-import fs from "fs/promises";
-import { homedir } from "os";
-import path from "path";
 import prompts from "prompts";
 import * as EmailValidator from 'email-validator';// Using ES6 modules with Babel or TypeScript
 import { program as Program } from "commander";
 import { addTimeLog, authenticateWithPassword, doRefreshToken, getCurrentTasks, getLogs, getOrCreateTags, stopTimeLog } from "./client";
 import { MyHoursTask } from "./structures";
 import * as luxon from "luxon";
-
-interface IStorage {
-    email: string;
-    accessToken: string;
-    refreshToken: string;
-    expiresAt: number;
-}
-
-const configPath = path.join((process.env.XDG_CONFIG_HOME || homedir()), "my-hours-cli.json");
-
-async function getStorage(): Promise<IStorage|null> {
-    try {
-        await fs.stat(configPath);
-    } catch (ex) {
-        return null;
-    }
-    const data = await fs.readFile(configPath, "utf-8");
-    return JSON.parse(data);
-}
-
-
-async function storeStorage(storage: IStorage): Promise<void> {
-    await fs.writeFile(configPath, JSON.stringify(storage));
-}
-
+import { getStorage, IStorage, storeStorage } from "./storage";
 
 async function ensureAuthenticated() {
     let storage: IStorage|null;
@@ -62,19 +35,19 @@ async function ensureAuthenticated() {
         }
         await storeStorage(storage);
         console.log("Stored new configuration");
-    } else {
-        if (Date.now() >= storage.expiresAt) {
-            console.debug("Refreshed token");
-            const date = Date.now();
-            const { accessToken, refreshToken, expiresIn } = await doRefreshToken(storage.refreshToken);
-            storage = {
-                ...storage,
-                accessToken,
-                refreshToken,
-                expiresAt: date + (expiresIn * 1000),
-            }
-            await storeStorage(storage);
+        return storage;
+    }
+    if (Date.now() >= storage.expiresAt) {
+        console.debug("Refreshed token");
+        const date = Date.now();
+        const { accessToken, refreshToken, expiresIn } = await doRefreshToken(storage.refreshToken);
+        storage = {
+            ...storage,
+            accessToken,
+            refreshToken,
+            expiresAt: date + (expiresIn * 1000),
         }
+        await storeStorage(storage);
     }
     return storage;
 }
@@ -130,21 +103,21 @@ async function main() {
         .description('Track a new task')
         .option('-t, --tags <tag>', 'Comma seperated list of tags to apply')
         .option('-s, --startTime <time>', 'Comma seperated list of tags to apply')
-        .argument('<note>', 'Task description').action(async (note, { tags, startTime }) => {
-        const startDate = startTime && luxon.DateTime.fromISO(startTime).toJSDate();
+        .argument('<note>', 'Task description').action(async (note: string, { tags, startTime }: Record<string, string>) => {
+        const startDate = startTime ? luxon.DateTime.fromISO(startTime).toJSDate() : undefined;
         const tagsStr: undefined|string[] = tags?.split(',').map((s: string) => s.trim());
         const tagsDefs = tagsStr && await getOrCreateTags(accessToken, tagsStr);
         const { id } = await addTimeLog(accessToken, note, tagsDefs, startDate);
         console.log("Started new log: ", id);
     });
-    Program.command('running').description('Get running tasks').action(async () => {
+    Program.command('running', { isDefault: true }).description('Get running tasks').action(async () => {
         const tasks = (await getCurrentTasks(accessToken)).filter(t => t.running);
         if (tasks.length) {
             tasks.forEach(task => {
                 console.log(` 📋 ${task.id} - ${task.note}`);
             });
         } else {
-            console.log("There are no tasks");
+            console.log("There are no running tasks");
         }
     });
     Program.command('previous').description('Get tasks from the previous day').option('-s, --standup').option('-d, --date <date>').action(async ({standup, date}) => {
@@ -189,4 +162,4 @@ async function main() {
 main().catch(ex => {
     console.error("Error running program", ex);
     process.exit(1);
-})
+});
