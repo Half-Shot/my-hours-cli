@@ -71,7 +71,7 @@ export async function getLogs(accessToken: string, date: Date) {
     return result as MyHoursTask[];
 }
 
-export async function addTimeLog(accessToken: string, note: string, tags?: MyHoursTag[]) {
+export async function addTimeLog(accessToken: string, note: string, tags?: MyHoursTag[], startTime?: Date) {
     const currentDate = new Date();
     const dateString = `${currentDate.getFullYear()}-${(currentDate.getMonth() + 1).toString().padStart(2, '0')}-${currentDate.getDate().toString().padStart(2, '0')}`;
     const res = await fetch("https://api2.myhours.com/api/logs/startNewLog", {
@@ -79,7 +79,7 @@ export async function addTimeLog(accessToken: string, note: string, tags?: MyHou
             projectId: null,
             taskId: null,
             date: dateString,
-            start: new Date().toISOString(),
+            start: startTime?.toISOString(),
             tagIds: tags?.map(t => t.id),
             note,
             billable: false,
