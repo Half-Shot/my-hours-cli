@@ -1,5 +1,5 @@
 import fetch from 'cross-fetch';
-import { MyHoursTask } from "./structures";
+import { MyHoursTag, MyHoursTask } from "./structures";
 export async function authenticateWithPassword(email: string, password: string) {
     const res = await fetch("https://api2.myhours.com/api/tokens/login", {
         body: JSON.stringify({
@@ -71,7 +71,7 @@ export async function getLogs(accessToken: string, date: Date) {
     return result as MyHoursTask[];
 }
 
-export async function addTimeLog(accessToken: string, note: string) {
+export async function addTimeLog(accessToken: string, note: string, tags?: MyHoursTag[]) {
     const currentDate = new Date();
     const dateString = `${currentDate.getFullYear()}-${(currentDate.getMonth() + 1).toString().padStart(2, '0')}-${currentDate.getDate().toString().padStart(2, '0')}`;
     const res = await fetch("https://api2.myhours.com/api/logs/startNewLog", {
@@ -80,6 +80,7 @@ export async function addTimeLog(accessToken: string, note: string) {
             taskId: null,
             date: dateString,
             start: new Date().toISOString(),
+            tagIds: tags?.map(t => t.id),
             note,
             billable: false,
         }),
@@ -117,4 +118,52 @@ export async function stopTimeLog(accessToken: string, logId: number) {
         throw Error('Failed to stop timer');
     }
     return result;
+}
+
+export async function createTag(accessToken: string, name: string) {
+    const res = await fetch("https://api2.myhours.com/api/tags", {
+        body: JSON.stringify({
+            name,
+            hexColor: "#007bff", // TODO: Customize this?
+        }),
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`,
+            'api-version': '1.0'
+        },
+        method: 'POST'
+    });
+    const result = await res.json();
+    if (res.status !== 201) {
+        console.error(result);
+        throw Error('Failed to create tags');
+    }
+    return result as MyHoursTag;
+}
+
+export async function getAllTags(accessToken: string) {
+    const res = await fetch("https://api2.myhours.com/api/tags/getalldx?hideArchived=true", {
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`,
+            'api-version': '1.0'
+        },
+        method: 'GET'
+    });
+    const result = await res.json();
+    if (res.status !== 200) {
+        console.error(result);
+        throw Error('Failed to get tags');
+    }
+    return result.data as MyHoursTag[];
+}
+
+export async function getOrCreateTags(accessToken: string, tags: string[]): Promise<MyHoursTag[]> {
+    const allTags = await getAllTags(accessToken);
+    const tagDefinitions = tags.map(tagName => allTags.find(t => t.name === tagName)).filter(t => !!t) as MyHoursTag[];
+    for (const missingTagName of tags.filter(tagName => !allTags.find(t => t.name === tagName))) {
+        const tag = await createTag(accessToken, missingTagName);
+        tagDefinitions.push(tag);
+    }
+    return tagDefinitions;
 }

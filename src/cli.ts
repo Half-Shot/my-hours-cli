@@ -4,7 +4,7 @@ import path from "path";
 import prompts from "prompts";
 import * as EmailValidator from 'email-validator';// Using ES6 modules with Babel or TypeScript
 import { program as Program } from "commander";
-import { addTimeLog, authenticateWithPassword, doRefreshToken, getCurrentTasks, getLogs, stopTimeLog } from "./client";
+import { addTimeLog, authenticateWithPassword, doRefreshToken, getCurrentTasks, getLogs, getOrCreateTags, stopTimeLog } from "./client";
 import { MyHoursTask } from "./structures";
 import * as luxon from "luxon";
 
@@ -126,8 +126,11 @@ async function getPrettyTaskList(accessToken: string, dateToCheck: Date, standup
 
 async function main() {
     const { accessToken } = await ensureAuthenticated();
-    Program.command('start').description('Track a new task').argument('<note>', 'Task description').action(async (note) => {
-        const { id } = await addTimeLog(accessToken, note);
+    Program.command('start').description('Track a new task').option('-t, --tags <tag>', 'Comma seperated list of tags to apply').argument('<note>', 'Task description').action(async (note, { tags }) => {
+        console.log(tags);
+        const tagsStr: undefined|string[] = tags?.split(',').map((s: string) => s.trim());
+        const tagsDefs = tagsStr && await getOrCreateTags(accessToken, tagsStr);
+        const { id } = await addTimeLog(accessToken, note, tagsDefs);
         console.log("Started new log: ", id);
     });
     Program.command('running').description('Get running tasks').action(async () => {
