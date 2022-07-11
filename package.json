@@ -19,6 +19,7 @@
     "ts-node": "^10.8.2"
   },
   "scripts": {
-    "cli": "ts-node cli.ts"
+    "cli": "ts-node cli.ts",
+    "build": "tsc"
   }
 }

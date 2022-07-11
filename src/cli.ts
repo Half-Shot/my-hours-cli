@@ -79,10 +79,53 @@ async function ensureAuthenticated() {
     return storage;
 }
 
+async function getPrettyTaskList(accessToken: string, dateToCheck: Date, standup: boolean) {
+    const rawTasks = await getLogs(accessToken, dateToCheck);
+    const tasks = Object.values(rawTasks.reduce<Record<string, MyHoursTask[]>>((taskSet, task) => {
+        if (taskSet[task.note]) {
+            taskSet[task.note].push(task);
+        } else {
+            taskSet[task.note] = [task];
+        }
+        return taskSet;
+    }, {})).map(taskSet => {
+        const orderedTimesStart = taskSet.flatMap(t => t.times.map(time => Date.parse(time.startTime))).sort();
+        const orderedTimesEnd = taskSet.flatMap(t => t.times.map(time => Date.parse(time.endTime))).sort();
+        return {
+            ids: taskSet.map(t => t.id),
+            start: orderedTimesStart[0],
+            end: orderedTimesEnd[orderedTimesEnd.length-1],
+            duration: luxon.Duration.fromMillis(taskSet.reduce((prev, task) => task.duration + prev, 0) * 1000).shiftTo('hours', 'minutes').toHuman({ unitDisplay: "short", maximumSignificantDigits: 2 }),
+            // Assuming task 0 is the same.
+            note: taskSet[0].note.trim(),
+            tags: taskSet[0].tags?.sort((t1,t2) => t1.id - t2.id),
+        }
+    }).sort((t1, t2) => t1.start - t2.start);
+
+    if (tasks.length) {
+        const isYesterday = (new Date().getDay()-dateToCheck.getDay() === 1);
+        if (standup) {
+            console.log(isYesterday ? "Yesterday:" : "Last week:")
+        }
+        tasks.forEach(taskSet => {
+            if (standup) {
+                const tag = taskSet.tags[0] ? `**${taskSet.tags[0].name}**: ` : "";
+                console.log(`  - ${tag}${taskSet.note}`);
+            } else {
+                console.log(`📋 ${luxon.DateTime.fromMillis(taskSet.start).toFormat('HH:mm')} - ${luxon.DateTime.fromMillis(taskSet.end).toFormat('HH:mm')} ${taskSet.duration} - ${taskSet.note} ${taskSet.tags.map(t => `#${t.name}`).join(',')} `);
+            }
+        });
+        if (standup) {
+            console.log("\nToday:\n  - Something")
+        }
+    } else {
+        console.log("There are no tasks");
+    }
+}
+
 
 async function main() {
     const { accessToken } = await ensureAuthenticated();
-    console.log(process.argv);
     Program.command('start').description('Track a new task').argument('<note>', 'Task description').action(async (note) => {
         const { id } = await addTimeLog(accessToken, note);
         console.log("Started new log: ", id);
@@ -111,47 +154,10 @@ async function main() {
         } else {
             dateToCheck = luxon.DateTime.fromFormat(date, 'dd-LL').toJSDate();
         }
-        const rawTasks = await getLogs(accessToken, dateToCheck);
-        const tasks = Object.values(rawTasks.reduce<Record<string, MyHoursTask[]>>((taskSet, task) => {
-            if (taskSet[task.note]) {
-                taskSet[task.note].push(task);
-            } else {
-                taskSet[task.note] = [task];
-            }
-            return taskSet;
-        }, {})).map(taskSet => {
-            const orderedTimesStart = taskSet.flatMap(t => t.times.map(time => Date.parse(time.startTime))).sort();
-            const orderedTimesEnd = taskSet.flatMap(t => t.times.map(time => Date.parse(time.endTime))).sort();
-            return {
-                ids: taskSet.map(t => t.id),
-                start: orderedTimesStart[0],
-                end: orderedTimesEnd[orderedTimesEnd.length-1],
-                duration: luxon.Duration.fromMillis(taskSet.reduce((prev, task) => task.duration + prev, 0) * 1000).shiftTo('hours', 'minutes').toHuman({ unitDisplay: "short", maximumSignificantDigits: 2 }),
-                // Assuming task 0 is the same.
-                note: taskSet[0].note.trim(),
-                tags: taskSet[0].tags?.sort((t1,t2) => t1.id - t2.id),
-            }
-        }).sort((t1, t2) => t1.start - t2.start);
-
-        if (tasks.length) {
-            if (standup) {
-                console.log("Yesterday:")
-            }
-            tasks.forEach(taskSet => {
-                if (standup) {
-                    const tag = taskSet.tags[0] ? `**${taskSet.tags[0].name}**: ` : "";
-                    console.log(`  - ${tag}${taskSet.note}`);
-                } else {
-                    console.log(`📋 ${luxon.DateTime.fromMillis(taskSet.start).toFormat('HH:mm')} - ${luxon.DateTime.fromMillis(taskSet.end).toFormat('HH:mm')} ${taskSet.duration} - ${taskSet.note} ${taskSet.tags.map(t => `#${t.name}`).join(',')} `);
-                }
-            });
-            if (standup) {
-                console.log("Today:\n  - Something")
-            }
-        } else {
-            console.log("There are no tasks");
-        }
-
+        await getPrettyTaskList(accessToken, dateToCheck, standup);
+    });
+    Program.command('today').description('Get tasks for today').option('-s, --standup').option('-d, --date <date>').action(async ({standup}) => {
+        await getPrettyTaskList(accessToken, new Date(), standup);
     });
     Program.command('stop').description('Stop a task.').argument('[taskId]', 'Task ID. If ommitted, will stop all running tasks.').action(async (taskId) => {
         let taskIds: number[];
