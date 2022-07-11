@@ -95,7 +95,7 @@ export async function addTimeLog(accessToken: string, note: string, tags?: MyHou
     return result as { id: string };
 }
 
-export async function stopTimeLog(accessToken: string, logId: number) {
+export async function stopTimeLog(accessToken: string, logId: number): Promise<MyHoursTask> {
     const res = await fetch("https://api2.myhours.com/api/logs/stopTimer", {
         body: JSON.stringify({
             logId,

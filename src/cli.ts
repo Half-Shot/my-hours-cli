@@ -55,6 +55,9 @@ async function ensureAuthenticated() {
 async function getPrettyTaskList(accessToken: string, dateToCheck: Date, standup: boolean) {
     const rawTasks = await getLogs(accessToken, dateToCheck);
     const tasks = Object.values(rawTasks.reduce<Record<string, MyHoursTask[]>>((taskSet, task) => {
+        if (!task.note) {
+            return taskSet;
+        }
         if (taskSet[task.note]) {
             taskSet[task.note].push(task);
         } else {
@@ -64,6 +67,9 @@ async function getPrettyTaskList(accessToken: string, dateToCheck: Date, standup
     }, {})).map(taskSet => {
         const orderedTimesStart = taskSet.flatMap(t => t.times.map(time => Date.parse(time.startTime))).sort();
         const orderedTimesEnd = taskSet.flatMap(t => t.times.map(time => Date.parse(time.endTime))).sort();
+        if (!taskSet[0].note) {
+            throw Error("task missing note. This shouldn't happen");
+        }
         return {
             ids: taskSet.map(t => t.id),
             start: orderedTimesStart[0],
@@ -151,7 +157,9 @@ async function main() {
             return;
         }
         for (const taskId of taskIds) {
-            await stopTimeLog(accessToken, taskId);
+            const log = await stopTimeLog(accessToken, taskId);
+            const time = luxon.Duration.fromMillis(log.duration * 1000).shiftTo('hours', 'minutes').toHuman({ unitDisplay: "short", maximumSignificantDigits: 2 });
+            console.log(`Stopped task ${log.note || log.id}. Recorded ${time}`);
         }
         console.log("Stopped running task(s)");
     });

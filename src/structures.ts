@@ -1,6 +1,6 @@
 export interface MyHoursTask {
     id: number;
-    note: string;
+    note: string|null;
     date: string;
     running: boolean;
     duration: number;
