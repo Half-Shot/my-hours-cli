@@ -85,7 +85,7 @@ async function getPrettyTaskList(accessToken: string, dateToCheck: Date, standup
                 const tag = taskSet.tags[0] ? `**${taskSet.tags[0].name}**: ` : "";
                 console.log(`  - ${tag}${taskSet.note}`);
             } else {
-                console.log(`📋 ${luxon.DateTime.fromMillis(taskSet.start).toFormat('HH:mm')} - ${luxon.DateTime.fromMillis(taskSet.end).toFormat('HH:mm')} ${taskSet.duration} - ${taskSet.note} ${taskSet.tags.map(t => `#${t.name}`).join(',')} `);
+                console.log(`📋 ${luxon.DateTime.fromMillis(taskSet.start).toFormat('HH:mm')} - ${luxon.DateTime.fromMillis(taskSet.end).toFormat('HH:mm')} ${taskSet.duration} - ${taskSet.note} (${taskSet.tags.map(t => `#${t.name}`).join(',')})`);
             }
         });
         if (standup) {
@@ -146,7 +146,7 @@ async function main() {
         } else {
             taskIds = [parseInt(taskId)];
         }
-        if (taskIds.length) {
+        if (!taskIds.length) {
             console.log("There are no running tasks");
             return;
         }

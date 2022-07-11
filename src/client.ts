@@ -16,8 +16,7 @@ export async function authenticateWithPassword(email: string, password: string) 
     });
     const result = await res.json();
     if (res.status !== 200) {
-        console.error(result);
-        throw Error('Failed to authenticate');
+        throw new MyHoursApiError(result);
     }
     return result as {
         accessToken: string,
@@ -40,8 +39,7 @@ export async function doRefreshToken(refreshToken: string) {
     });
     const result = await res.json();
     if (res.status !== 200) {
-        console.error(result);
-        throw Error('Failed to authenticate');
+        throw new MyHoursApiError(result);
     }
     return result as {
         accessToken: string,
@@ -65,8 +63,7 @@ export async function getLogs(accessToken: string, date: Date) {
     });
     const result = await res.json();
     if (res.status !== 200) {
-        console.error(result);
-        throw Error('Failed to get current tasks');
+        throw new MyHoursApiError(result);
     }
     return result as MyHoursTask[];
 }
@@ -93,8 +90,7 @@ export async function addTimeLog(accessToken: string, note: string, tags?: MyHou
     });
     const result = await res.json();
     if (res.status !== 201) {
-        console.error(result);
-        throw Error('Failed to start timer');
+        throw new MyHoursApiError(result);
     }
     return result as { id: string };
 }
@@ -114,8 +110,7 @@ export async function stopTimeLog(accessToken: string, logId: number) {
     });
     const result = await res.json();
     if (res.status !== 200) {
-        console.error(result);
-        throw Error('Failed to stop timer');
+        throw new MyHoursApiError(result);
     }
     return result;
 }
@@ -135,8 +130,7 @@ export async function createTag(accessToken: string, name: string) {
     });
     const result = await res.json();
     if (res.status !== 201) {
-        console.error(result);
-        throw Error('Failed to create tags');
+        throw new MyHoursApiError(result);
     }
     return result as MyHoursTag;
 }
@@ -152,8 +146,7 @@ export async function getAllTags(accessToken: string) {
     });
     const result = await res.json();
     if (res.status !== 200) {
-        console.error(result);
-        throw Error('Failed to get tags');
+        throw new MyHoursApiError(result);
     }
     return result.data as MyHoursTag[];
 }
@@ -166,4 +159,10 @@ export async function getOrCreateTags(accessToken: string, tags: string[]): Prom
         tagDefinitions.push(tag);
     }
     return tagDefinitions;
+}
+
+export class MyHoursApiError extends Error {
+    constructor(errorBody: {message: string, validationErrors: string[]}) {
+        super(`ApiError ${errorBody.message}\n  ${errorBody.validationErrors.join('\n  ')}`)
+    }
 }
