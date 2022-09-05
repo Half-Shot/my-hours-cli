@@ -1,5 +1,5 @@
 import fs from "fs/promises";
-import { homedir } from "os";
+import { homedir, platform } from "os";
 import path from "path";
 
 export interface IStorage {
@@ -9,7 +9,17 @@ export interface IStorage {
     expiresAt: number;
 }
 
-const configPath = path.join((process.env.XDG_CONFIG_HOME || homedir()), "my-hours-cli.json");
+function getStoragePath() {
+    if (process.env.XDG_CONFIG_HOME) {
+        return path.join(process.env.XDG_CONFIG_HOME, "my-hours-cli.json");
+    }
+    if (["linux", "darwin"].includes(platform())) {
+        return path.join(homedir(), "/.config/my-hours-cli.json");
+    }
+    return path.join(homedir(), "my-hours-cli.json");
+}
+
+const configPath = getStoragePath(); 
 
 export async function getStorage(): Promise<IStorage|null> {
     try {
