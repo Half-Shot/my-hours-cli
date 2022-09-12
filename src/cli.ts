@@ -120,7 +120,9 @@ async function main() {
         const tasks = (await getCurrentTasks(accessToken)).filter(t => t.running);
         if (tasks.length) {
             tasks.forEach(task => {
-                console.log(` 📋 ${task.id} - ${task.note}`);
+                const startDate = new Date(task.times[0]?.startTime);
+                const duration = luxon.Duration.fromMillis(Date.now() - startDate.getTime()).shiftTo('hours', 'minutes').toHuman({ unitDisplay: "short", maximumSignificantDigits: 1 })
+                console.log(` 📋 ${duration} | ${task.id} - ${task.note}`);
             });
         } else {
             console.log("There are no running tasks");
@@ -162,6 +164,29 @@ async function main() {
             console.log(`Stopped task ${log.note || log.id}. Recorded ${time}`);
         }
         console.log("Stopped running task(s)");
+    });
+    Program.command('interative').alias('i').action(async () => {
+        const {note, tags, startTime} = await prompts([{
+            message: 'What are you working on?',
+            type: 'text',
+            name: 'note',
+            validate: (s) => s?.length,
+        }, {
+            message: 'Any tags? (comma seperated)',
+            type: 'list',
+            name: 'tags',
+            separator: ','
+        }, {
+            message: 'Start time?',
+            type: 'text',
+            name: 'startTime',
+            validate: (s) => { if (!s) { return true; } try { luxon.DateTime.fromISO(s).toJSDate(); return true; } catch { return false; }}
+        }]);
+        const startDate = startTime ? luxon.DateTime.fromISO(startTime).toJSDate() : undefined;
+        const tagsFiltered = tags.filter((s: string) => !!s);
+        const tagsDefs = tagsFiltered.length && await getOrCreateTags(accessToken, tagsFiltered);
+        const { id } = await addTimeLog(accessToken, note, tagsDefs, startDate);
+        console.log("Started new log: ", id);
     });
 
     return Program.parseAsync();
