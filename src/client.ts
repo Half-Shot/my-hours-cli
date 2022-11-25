@@ -128,7 +128,7 @@ export async function addTimeLog(accessToken: string, note: string, tags?: MyHou
             date: dateString,
             start: startTime?.toISOString(),
             tagIds: tags?.map(t => t.id),
-            note,
+            note: note,
             billable: false,
         }),
         headers: {
