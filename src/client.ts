@@ -52,6 +52,26 @@ export async function getCurrentTasks(accessToken: string) {
     return getLogs(accessToken, new Date());
 }
 
+export async function removeTimeLogsWithNote(accessToken: string, note: string, startDate: Date) {
+    const logs: MyHoursTask[] = await getLogs(accessToken, startDate);
+    logs.forEach(async function(log) {
+        if (log.note == note) {
+            await removeTimeLog(accessToken, log.id);
+        }
+    });
+}
+
+
+export async function removeTimeLog(accessToken: string, id: Number) {
+    const res = await fetch(`https://api2.myhours.com/api/Logs/${id}`, {
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`,
+            'api-version': '1.0'
+        },
+        method: 'DELETE'
+    });
+}
 export async function getLogs(accessToken: string, date: Date) {
     const dateString = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`;
     const res = await fetch(`https://api2.myhours.com/api/logs?date=${dateString}&startIndex=0&step=1000`, {
@@ -66,6 +86,36 @@ export async function getLogs(accessToken: string, date: Date) {
         throw new MyHoursApiError(result);
     }
     return result as MyHoursTask[];
+}
+
+
+export async function insertLog(accessToken: string, note: string, day: Date, duration: Number, projectId: string, tags?: MyHoursTag[], taskId: string|null = null) {
+    const dateString = `${day.getFullYear()}-${(day.getMonth() + 1).toString().padStart(2, '0')}-${day.getDate().toString().padStart(2, '0')}`;
+
+    let json = {
+            projectId: projectId,
+            taskId: taskId,
+            date: dateString,
+            tagIds: tags?.map(t => t.id),
+            note,
+            billable: false,
+        duration: duration
+        }
+
+    const res = await fetch("https://api2.myhours.com/api/logs/insertLog", {
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`,
+            'api-version': '1.0'
+        },
+        body: JSON.stringify(json),
+        method: 'POST'
+    });
+    const result = await res.json();
+    if (res.status !== 201) {
+        throw new MyHoursApiError(result);
+    }
+    return result as { id: string };
 }
 
 export async function addTimeLog(accessToken: string, note: string, tags?: MyHoursTag[], startTime?: Date) {

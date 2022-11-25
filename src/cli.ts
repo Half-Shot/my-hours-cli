@@ -1,7 +1,7 @@
 import prompts from "prompts";
 import * as EmailValidator from 'email-validator';// Using ES6 modules with Babel or TypeScript
 import { program as Program } from "commander";
-import { addTimeLog, authenticateWithPassword, doRefreshToken, getCurrentTasks, getLogs, getOrCreateTags, stopTimeLog } from "./client";
+import { addTimeLog, authenticateWithPassword, doRefreshToken, getCurrentTasks, getLogs, getOrCreateTags, insertLog, stopTimeLog, removeTimeLogsWithNote } from "./client";
 import { MyHoursTask } from "./structures";
 import * as luxon from "luxon";
 import { getStorage, IStorage, storeStorage } from "./storage";
@@ -116,6 +116,37 @@ async function main() {
         const { id } = await addTimeLog(accessToken, note, tagsDefs, startDate);
         console.log("Started new log: ", id);
     });
+    Program.command('fudge')
+        .description('Distribute hours across the week. Removes all previous fudged entries, creates new by splitting hours evenly across the week.')
+        .option('-t, --tags <tag>', 'Comma seperated list of tags to apply')
+        .requiredOption('-w, --weekBegins <day>', "Week begins on this day, defaults to last Tuesday.")
+        .argument('<hoursProjectTask...>', 'Space-separated list of <Hours:ProjectId[:TaskID]>')
+        .action(async (hoursProjectTask, {tags, weekBegins}) => {
+        const tagsStr: undefined|string[] = tags?.split(',').map((s: string) => s.trim());
+        const tagsDefs = tagsStr && await getOrCreateTags(accessToken, tagsStr);
+        const startDate = new Date(weekBegins);
+        for (let i = 0; i < 7; i++) {
+            const currentDate = new Date(weekBegins);
+            currentDate.setDate(currentDate.getDate() + i);
+            await removeTimeLogsWithNote(accessToken, "auto_fudge", currentDate);
+            // no data on saturday or sunday...
+            if (currentDate.getDay() == 6 || currentDate.getDay() == 0) {
+                                 // but the 0th day is the sabbath, and the 6th is equally bad for timesheets
+                                 continue;
+                        }
+            hoursProjectTask.forEach(async function(ptd: string) {
+                const ptdparts = ptd.split(":")
+                const hours = Math.trunc(Number(ptdparts[0]) * 60 * 60 / 5);
+                const projectId = ptdparts[1];
+                let taskId = null;
+                if (ptdparts.length > 2) {
+                    taskId = ptdparts[2];
+                }
+                const { id } = await insertLog(accessToken, "auto_fudge", currentDate, hours, projectId, tagsDefs, taskId);
+                console.log("Added log for ", currentDate, " hours ", hours, "id is ", id)
+            });
+        }
+        });
     Program.command('running', { isDefault: true }).description('Get running tasks').action(async () => {
         const tasks = (await getCurrentTasks(accessToken)).filter(t => t.running);
         if (tasks.length) {
@@ -188,7 +219,6 @@ async function main() {
         const { id } = await addTimeLog(accessToken, note, tagsDefs, startDate);
         console.log("Started new log: ", id);
     });
-
     return Program.parseAsync();
 }
 
