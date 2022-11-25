@@ -26,6 +26,6 @@ Commands:
   previous [options]  Get tasks from the previous day
   today [options]     Get tasks for today
   stop [taskId]       Stop a task.
-  fudge ...           Distribute hours by project across the week.
+  fudge [options]     Distribute hours by project across the week.
   help [command]      display help for command
 ```
