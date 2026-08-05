@@ -1,168 +1,106 @@
-import fetch from 'cross-fetch';
-import { MyHoursTag, MyHoursTask } from "./structures";
-export async function authenticateWithPassword(email: string, password: string) {
-    const res = await fetch("https://api2.myhours.com/api/tokens/login", {
-        body: JSON.stringify({
-            grantType: 'password',
-            clientId: 'api',
-            email,
-            password,
-        }),
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'api-version': '1.0'
+import { MyHoursProject, MyHoursProjectTask, MyHoursProjectTaskList, MyHoursTag, MyHoursTask } from "./structures.js";
+
+export class MyHoursApiError extends Error {
+    constructor(public readonly statusCode: number, {message, validationErrors}: { message: string, validationErrors?: string[] }) {
+        super(`ApiError ${statusCode} ${message}\n  ${validationErrors?.join('\n  ')}`)
+    }
+}
+
+function dateToParameter(date: Date) {
+    return `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`;
+}
+
+export class MyHoursClient {
+
+    constructor(private readonly accessToken: string) {
+
+    }
+
+    private async doRequest(path: string, method = "GET", body?: Record<string, unknown>): Promise<unknown> {
+        const url = new URL(path, "https://api2.myhours.com");
+        const res = await fetch(url, {
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `ApiKey ${this.accessToken}`,
+                'api-version': '1.0'
+            },
+            method,
+            body: body && JSON.stringify(body),
+        });
+        const contentType = res.headers.get("Content-Type");
+        if (res.headers.get("Content-Type")?.split(";", 2)[0] === "application/json") {
+            const result = await res.json();
+            if (!res.ok) {
+                throw new MyHoursApiError(res.status, result);
+            }
+            return result;
         }
-    });
-    const result = await res.json();
-    if (res.status !== 200) {
-        throw new MyHoursApiError(result);
-    }
-    return result as {
-        accessToken: string,
-        refreshToken: string,
-        expiresIn: number,
-    }
-}
-
-export async function doRefreshToken(refreshToken: string) {
-    const res = await fetch("https://api2.myhours.com/api/tokens/refresh", {
-        body: JSON.stringify({
-            grantType: 'refresh_token',
-            refreshToken: refreshToken,
-        }),
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'api-version': '1.0'
+        if (res.ok) {
+            throw new Error(`Response from MyHours was unexpected content-type "${contentType}"`);
         }
-    });
-    const result = await res.json();
-    if (res.status !== 200) {
-        throw new MyHoursApiError(result);
+        const message = await res.text();
+        throw new MyHoursApiError(res.status, {message});
     }
-    return result as {
-        accessToken: string,
-        refreshToken: string,
-        expiresIn: number,
+
+    public async getLogs(date: Date): Promise<MyHoursTask[]> {
+        return await this.doRequest(`/api/Logs?date=${dateToParameter(date)}&startIndex=0&step=1000`) as MyHoursTask[];
     }
-}
 
-export async function getCurrentTasks(accessToken: string) {
-    return getLogs(accessToken, new Date());
-}
-
-export async function getLogs(accessToken: string, date: Date) {
-    const dateString = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`;
-    const res = await fetch(`https://api2.myhours.com/api/logs?date=${dateString}&startIndex=0&step=1000`, {
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${accessToken}`,
-            'api-version': '1.0'
-        }
-    });
-    const result = await res.json();
-    if (res.status !== 200) {
-        throw new MyHoursApiError(result);
+    public async getCurrentTasks(): Promise<MyHoursTask[]> {
+        return this.getLogs(new Date());
     }
-    return result as MyHoursTask[];
-}
 
-export async function addTimeLog(accessToken: string, note: string, tags?: MyHoursTag[], startTime?: Date) {
-    const currentDate = new Date();
-    const dateString = `${currentDate.getFullYear()}-${(currentDate.getMonth() + 1).toString().padStart(2, '0')}-${currentDate.getDate().toString().padStart(2, '0')}`;
-    const res = await fetch("https://api2.myhours.com/api/logs/startNewLog", {
-        body: JSON.stringify({
+    public async addTimeLog(note: string, tags?: MyHoursTag[], startTime?: Date): Promise<{id: string}> {
+        return await this.doRequest("/api/logs/startNewLog", "POST", {
             projectId: null,
             taskId: null,
-            date: dateString,
+            date: dateToParameter(new Date()),
             start: startTime?.toISOString(),
             tagIds: tags?.map(t => t.id),
             note,
             billable: false,
-        }),
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${accessToken}`,
-            'api-version': '1.0'
-        },
-        method: 'POST'
-    });
-    const result = await res.json();
-    if (res.status !== 201) {
-        throw new MyHoursApiError(result);
+        }) as { id: string };
     }
-    return result as { id: string };
-}
 
-export async function stopTimeLog(accessToken: string, logId: number): Promise<MyHoursTask> {
-    const res = await fetch("https://api2.myhours.com/api/logs/stopTimer", {
-        body: JSON.stringify({
+    public async stopTimeLog(logId: number): Promise<MyHoursTask> {
+        return await this.doRequest("/api/logs/stopTimer", "POST", {
             logId,
             time: new Date().toISOString(),
-        }),
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${accessToken}`,
-            'api-version': '1.0'
-        },
-        method: 'POST'
-    });
-    const result = await res.json();
-    if (res.status !== 200) {
-        throw new MyHoursApiError(result);
+        }) as MyHoursTask;
     }
-    return result;
-}
 
-export async function createTag(accessToken: string, name: string) {
-    const res = await fetch("https://api2.myhours.com/api/tags", {
-        body: JSON.stringify({
+    public async createTag(name: string, hexColor = "#007bff"): Promise<MyHoursTag> {
+        return await this.doRequest("/api/Tags", "POST", {
             name,
-            hexColor: "#007bff", // TODO: Customize this?
-        }),
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${accessToken}`,
-            'api-version': '1.0'
-        },
-        method: 'POST'
-    });
-    const result = await res.json();
-    if (res.status !== 201) {
-        throw new MyHoursApiError(result);
+            hexColor,
+        }) as MyHoursTag;
     }
-    return result as MyHoursTag;
-}
 
-export async function getAllTags(accessToken: string) {
-    const res = await fetch("https://api2.myhours.com/api/tags/getalldx?hideArchived=true", {
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${accessToken}`,
-            'api-version': '1.0'
-        },
-        method: 'GET'
-    });
-    const result = await res.json();
-    if (res.status !== 200) {
-        throw new MyHoursApiError(result);
+    public async getAllTags(): Promise<MyHoursTag[]> {
+        const {data} = await this.doRequest("/api/Tags", "GET") as { data: MyHoursTag[] };
+        return data.filter(t => t.dateArchived === null);
     }
-    return result.data as MyHoursTag[];
-}
 
-export async function getOrCreateTags(accessToken: string, tags: string[]): Promise<MyHoursTag[]> {
-    const allTags = await getAllTags(accessToken);
-    const tagDefinitions = tags.map(tagName => allTags.find(t => t.name === tagName)).filter(t => !!t) as MyHoursTag[];
-    for (const missingTagName of tags.filter(tagName => !allTags.find(t => t.name === tagName))) {
-        const tag = await createTag(accessToken, missingTagName);
-        tagDefinitions.push(tag);
+    public async getActiveProjects(): Promise<MyHoursProject[]> {
+        return await this.doRequest("/api/Projects") as MyHoursProject[];
     }
-    return tagDefinitions;
-}
 
-export class MyHoursApiError extends Error {
-    constructor(errorBody: {message: string, validationErrors: string[]}) {
-        super(`ApiError ${errorBody.message}\n  ${errorBody.validationErrors.join('\n  ')}`)
+    public async getProjectTasks(projectId: number): Promise<MyHoursProjectTask[]> {
+        const lists = await this.doRequest(`/api/Projects/${projectId}/tasklist`) as MyHoursProjectTaskList[];
+        return lists.flatMap(list => [...list.completedTasks, ...list.incompletedTasks]);
+    }
+
+    public async createProjectTask(projectId: number, name: string): Promise<MyHoursProjectTask> {
+        return await this.doRequest(`/api/Projects/${projectId}/task`, "POST", { name }) as MyHoursProjectTask;
+    }
+
+    public async getOrCreateTags(tags: string[]): Promise<MyHoursTag[]> {
+        const allTags = await this.getAllTags();
+        const tagDefinitions = tags.map(tagName => allTags.find(t => t.name === tagName)).filter(t => !!t) as MyHoursTag[];
+        for (const missingTagName of tags.filter(tagName => !allTags.find(t => t.name === tagName))) {
+            const tag = await this.createTag(missingTagName);
+            tagDefinitions.push(tag);
+        }
+        return tagDefinitions;
     }
 }

@@ -1,59 +1,56 @@
 import prompts from "prompts";
-import * as EmailValidator from 'email-validator';// Using ES6 modules with Babel or TypeScript
 import { program as Program } from "commander";
-import { addTimeLog, authenticateWithPassword, doRefreshToken, getCurrentTasks, getLogs, getOrCreateTags, stopTimeLog } from "./client";
-import { MyHoursTask } from "./structures";
+import { homedir } from "os";
+import path from "path";
+import { MyHoursApiError, MyHoursClient } from "./client.js";
+import { MyHoursTask } from "./structures.js";
 import * as luxon from "luxon";
-import { getStorage, IStorage, storeStorage } from "./storage";
+import { getStorage, IStorage, storeStorage } from "./storage.js";
+import { buildWeekSummary } from "./summary.js";
+import { getOrPromptAssignment } from "./projects.js";
 
-async function ensureAuthenticated() {
+function formatHours(hours: number): string {
+    return Number.isInteger(hours) ? `${hours}h` : `${hours.toFixed(1)}h`;
+}
+
+async function getClient(): Promise<MyHoursClient> {
     let storage: IStorage|null;
     try {
         storage = await getStorage();
     } catch (ex) {
         throw Error('Could not open storage for reading. ' + ex);
     }
-    if (!storage) {
-        // New config
-        const {email, password} = await prompts([{
-            message: 'What is your MyHours email address?',
-            type: 'text',
-            name: 'email',
-            validate: EmailValidator.validate,
-        }, {
-            message: 'What is your MyHours password?',
-            type: 'password',
-            name: 'password'
-        }]);
-        const date = Date.now();
-        const { accessToken, refreshToken, expiresIn } = await authenticateWithPassword(email, password);
-        storage = {
-            email,
-            accessToken,
-            refreshToken,
-            expiresAt: date + (expiresIn * 1000)
+    if (storage?.accessToken) {
+        // Check existing config
+        const client = new MyHoursClient(storage.accessToken);
+        try {
+            await client.getCurrentTasks();
+            return client;
+        } catch (ex) {
+            if (ex instanceof MyHoursApiError && ex.statusCode === 401) {
+                // Needs to reauthenticate
+                storage = null;
+                console.log("Token expired, please enter a new token");
+            } else {
+                throw ex;
+            }
         }
-        await storeStorage(storage);
-        console.log("Stored new configuration");
-        return storage;
     }
-    if (Date.now() >= storage.expiresAt) {
-        console.debug("Refreshed token");
-        const date = Date.now();
-        const { accessToken, refreshToken, expiresIn } = await doRefreshToken(storage.refreshToken);
-        storage = {
-            ...storage,
-            accessToken,
-            refreshToken,
-            expiresAt: date + (expiresIn * 1000),
-        }
-        await storeStorage(storage);
-    }
-    return storage;
+    // New config
+    const {accessToken} = await prompts([{
+        message: 'Provide a MyHours API key',
+        type: 'password',
+        name: 'accessToken',
+    }]);
+    const client = new MyHoursClient(accessToken);
+    await client.getCurrentTasks();
+    await storeStorage({accessToken});
+    console.log("Stored new configuration");
+    return client;
 }
 
-async function getPrettyTaskList(accessToken: string, dateToCheck: Date, standup: boolean) {
-    const rawTasks = await getLogs(accessToken, dateToCheck);
+async function getPrettyTaskList(client: MyHoursClient, dateToCheck: Date, standup: boolean) {
+    const rawTasks = await client.getLogs(dateToCheck);
     const tasks = Object.values(rawTasks.reduce<Record<string, MyHoursTask[]>>((taskSet, task) => {
         if (!task.note) {
             return taskSet;
@@ -104,7 +101,7 @@ async function getPrettyTaskList(accessToken: string, dateToCheck: Date, standup
 
 
 async function main() {
-    const { accessToken } = await ensureAuthenticated();
+    const client = await getClient();
     Program.command('start')
         .description('Track a new task')
         .option('-t, --tags <tag>', 'Comma seperated list of tags to apply')
@@ -112,12 +109,12 @@ async function main() {
         .argument('<note>', 'Task description').action(async (note: string, { tags, startTime }: Record<string, string>) => {
         const startDate = startTime ? luxon.DateTime.fromISO(startTime).toJSDate() : undefined;
         const tagsStr: undefined|string[] = tags?.split(',').map((s: string) => s.trim());
-        const tagsDefs = tagsStr && await getOrCreateTags(accessToken, tagsStr);
-        const { id } = await addTimeLog(accessToken, note, tagsDefs, startDate);
+        const tagsDefs = tagsStr && await client.getOrCreateTags(tagsStr);
+        const { id } = await client.addTimeLog(note, tagsDefs, startDate);
         console.log("Started new log: ", id);
     });
     Program.command('running', { isDefault: true }).description('Get running tasks').action(async () => {
-        const tasks = (await getCurrentTasks(accessToken)).filter(t => t.running);
+        const tasks = (await client.getCurrentTasks()).filter(t => t.running);
         if (tasks.length) {
             tasks.forEach(task => {
                 const startDate = new Date(task.times[0]?.startTime);
@@ -138,19 +135,19 @@ async function main() {
                 dateToCheck = new Date(dateToCheck.getTime() - 3*24*60*60*1000);
             } else if (dateToCheck.getUTCDay() <= 6) { // previous day
                 dateToCheck = new Date(dateToCheck.getTime() - 24*60*60*1000)
-            } 
+            }
         } else {
             dateToCheck = luxon.DateTime.fromFormat(date, 'dd-LL').toJSDate();
         }
-        await getPrettyTaskList(accessToken, dateToCheck, standup);
+        await getPrettyTaskList(client, dateToCheck, standup);
     });
     Program.command('today').description('Get tasks for today').option('-s, --standup').option('-d, --date <date>').action(async ({standup}) => {
-        await getPrettyTaskList(accessToken, new Date(), standup);
+        await getPrettyTaskList(client, new Date(), standup);
     });
     Program.command('stop').description('Stop a task.').argument('[taskId]', 'Task ID. If ommitted, will stop all running tasks.').action(async (taskId) => {
         let taskIds: number[];
         if (!taskId) {
-            taskIds = (await getCurrentTasks(accessToken)).filter(t => t.running).map(t => t.id);
+            taskIds = (await client.getCurrentTasks()).filter(t => t.running).map(t => t.id);
         } else {
             taskIds = [parseInt(taskId)];
         }
@@ -159,11 +156,35 @@ async function main() {
             return;
         }
         for (const taskId of taskIds) {
-            const log = await stopTimeLog(accessToken, taskId);
+            const log = await client.stopTimeLog(taskId);
             const time = luxon.Duration.fromMillis(log.duration * 1000).shiftTo('hours', 'minutes').toHuman({ unitDisplay: "short", maximumSignificantDigits: 2 });
             console.log(`Stopped task ${log.note || log.id}. Recorded ${time}`);
         }
         console.log("Stopped running task(s)");
+    });
+    Program.command('summarise-week').description('Estimate hours worked this week from git activity across ~/git repos and assign a Project/Task')
+        .option('--reassign', 'Ignore cached Project/Task assignments and prompt again for every branch touched this run')
+        .action(async ({ reassign }) => {
+        const days = await buildWeekSummary({ rootDir: path.join(homedir(), 'git') });
+        if (!days.length) {
+            console.log("No git activity found for this week.");
+            return;
+        }
+        let weekTotal = 0;
+        for (const day of days) {
+            console.log(`\n${luxon.DateTime.fromISO(day.date).toFormat('cccc yyyy-LL-dd')}`);
+            let dayTotal = 0;
+            for (const entry of day.entries) {
+                const assignment = await getOrPromptAssignment(client, entry.repoPath, entry.repoName, entry.branch, reassign);
+                if (assignment === 'skip') {
+                    continue;
+                }
+                dayTotal += entry.hours;
+                console.log(`  ${entry.repoName} (${entry.branch}) — ${assignment.projectName} / ${assignment.taskName}: ${formatHours(entry.hours)} [${entry.commitCount} commits, ${entry.firstTime}–${entry.lastTime}]`);
+            }
+            weekTotal += dayTotal;
+        }
+        console.log(`\nTotal this week: ${formatHours(weekTotal)}`);
     });
     Program.command('interative').alias('i').action(async () => {
         const {note, tags, startTime} = await prompts([{
@@ -184,8 +205,8 @@ async function main() {
         }]);
         const startDate = startTime ? luxon.DateTime.fromISO(startTime).toJSDate() : undefined;
         const tagsFiltered = tags.filter((s: string) => !!s);
-        const tagsDefs = tagsFiltered.length && await getOrCreateTags(accessToken, tagsFiltered);
-        const { id } = await addTimeLog(accessToken, note, tagsDefs, startDate);
+        const tagsDefs = tagsFiltered.length && await client.getOrCreateTags(tagsFiltered);
+        const { id } = await client.addTimeLog(note, tagsDefs, startDate);
         console.log("Started new log: ", id);
     });
 

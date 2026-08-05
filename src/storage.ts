@@ -2,11 +2,16 @@ import fs from "fs/promises";
 import { homedir, platform } from "os";
 import path from "path";
 
+export interface BranchAssignment {
+    projectId: number;
+    projectName: string;
+    taskId: number;
+    taskName: string;
+}
+
 export interface IStorage {
-    email: string;
     accessToken: string;
-    refreshToken: string;
-    expiresAt: number;
+    branchAssignments?: Record<string, BranchAssignment|'skip'>;
 }
 
 function getStoragePath() {
@@ -19,7 +24,7 @@ function getStoragePath() {
     return path.join(homedir(), "my-hours-cli.json");
 }
 
-const configPath = getStoragePath(); 
+const configPath = getStoragePath();
 
 export async function getStorage(): Promise<IStorage|null> {
     try {
@@ -34,4 +39,11 @@ export async function getStorage(): Promise<IStorage|null> {
 
 export async function storeStorage(storage: IStorage): Promise<void> {
     await fs.writeFile(configPath, JSON.stringify(storage));
+}
+
+export async function updateStorage(partial: Partial<IStorage>): Promise<IStorage> {
+    const existing = await getStorage();
+    const updated = { ...existing, ...partial } as IStorage;
+    await storeStorage(updated);
+    return updated;
 }
