@@ -62,6 +62,16 @@ export class MyHoursClient {
         }) as { id: string };
     }
 
+    public async insertLog(input: { projectId: number, taskId: number, note: string, date: string, durationSeconds: number }): Promise<MyHoursTask> {
+        return await this.doRequest("/api/Logs/insertlog", "POST", {
+            projectId: input.projectId,
+            taskId: input.taskId,
+            note: input.note,
+            date: input.date,
+            duration: input.durationSeconds,
+        }) as MyHoursTask;
+    }
+
     public async stopTimeLog(logId: number): Promise<MyHoursTask> {
         return await this.doRequest("/api/logs/stopTimer", "POST", {
             logId,

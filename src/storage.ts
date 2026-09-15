@@ -12,6 +12,11 @@ export interface BranchAssignment {
 export interface IStorage {
     accessToken: string;
     branchAssignments?: Record<string, BranchAssignment|'skip'>;
+    // undefined = never asked, null = asked and declined, string = configured.
+    icalUrl?: string|null;
+    // Keys already pushed to MyHours via commit-week, so re-running it for the
+    // same week doesn't create duplicate time logs.
+    committedEntries?: Record<string, true>;
 }
 
 function getStoragePath() {

@@ -36,7 +36,7 @@ export function isWeekend(dt: luxon.DateTime): boolean {
     return dt.weekday >= 6;
 }
 
-export function bucketCommitsByDay(commits: RepoCommit[], weekStart: luxon.DateTime): Map<string, luxon.DateTime[]> {
+export function bucketCommitsByDay(commits: RepoCommit[], weekStart: luxon.DateTime, weekEnd: luxon.DateTime): Map<string, luxon.DateTime[]> {
     const buckets = new Map<string, luxon.DateTime[]>();
     for (const commit of commits) {
         const dt = luxon.DateTime.fromISO(commit.authorDateIso);
@@ -44,8 +44,10 @@ export function bucketCommitsByDay(commits: RepoCommit[], weekStart: luxon.DateT
         // authored before this week but rebased/amended since will still be
         // returned by getBranchCommits (committer date is always >= author date,
         // so this can only let extra old commits through, never drop new ones).
-        // Filter by the true author date here to exclude those stale commits.
-        if (!dt.isValid || dt < weekStart || isWeekend(dt)) {
+        // Filter by the true author date here to exclude those stale commits, and
+        // to enforce the upper bound too (needed when summarising a past week,
+        // since getBranchCommits has no --until to avoid the same committer-date pitfall).
+        if (!dt.isValid || dt < weekStart || dt > weekEnd || isWeekend(dt)) {
             continue;
         }
         const key = dt.toISODate();
@@ -80,15 +82,28 @@ export function capDayToEightHours<T extends { hours: number }>(entries: T[]): T
     return entries.map(entry => ({ ...entry, hours: entry.hours * scale }));
 }
 
-export interface BuildWeekSummaryOptions {
-    rootDir: string;
+export interface WeekWindow {
+    weekStart: luxon.DateTime;
+    weekEnd: luxon.DateTime;
 }
 
-export async function buildWeekSummary({ rootDir }: BuildWeekSummaryOptions): Promise<DaySummary[]> {
-    const now = luxon.DateTime.now();
-    const weekStart = getWeekWindowStart(now);
+export function getWeekWindow(referenceDate?: luxon.DateTime): WeekWindow {
+    const weekStart = getWeekWindowStart(referenceDate ?? luxon.DateTime.now());
+    const weekEnd = weekStart.plus({ days: 4 }).endOf("day"); // Friday of that week
+    return { weekStart, weekEnd };
+}
+
+export interface BuildWeekSummaryOptions {
+    rootDir: string;
+    referenceDate?: luxon.DateTime;
+}
+
+export async function buildWeekSummary({ rootDir, referenceDate }: BuildWeekSummaryOptions): Promise<DaySummary[]> {
+    const { weekStart, weekEnd } = getWeekWindow(referenceDate);
     const sinceIso = weekStart.toISO() as string;
-    const activityCutoffMs = now.minus({ weeks: ACTIVITY_LOOKBACK_WEEKS }).toMillis();
+    // Based on the target week, not real "now", so summarising a past week doesn't
+    // get its repos wrongly dropped for looking inactive relative to today.
+    const activityCutoffMs = weekStart.minus({ weeks: ACTIVITY_LOOKBACK_WEEKS }).toMillis();
 
     // day -> list of raw entries (before capping) with per-commit dates so we can compute hours/commitCount/first/last together.
     const dayBuckets = new Map<string, { repoPath: string; repoName: string; branch: string; dates: luxon.DateTime[] }[]>();
@@ -113,7 +128,7 @@ export async function buildWeekSummary({ rootDir }: BuildWeekSummaryOptions): Pr
             if (!commits.length) {
                 continue;
             }
-            const byDay = bucketCommitsByDay(commits, weekStart);
+            const byDay = bucketCommitsByDay(commits, weekStart, weekEnd);
             for (const [day, dates] of byDay) {
                 const list = dayBuckets.get(day) ?? [];
                 list.push({ repoPath, repoName, branch, dates });

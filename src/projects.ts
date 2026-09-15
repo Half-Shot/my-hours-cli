@@ -77,8 +77,35 @@ async function getTasksCached(client: MyHoursClient, projectId: number): Promise
     return tasks;
 }
 
+const HOLIDAY_PROJECT_NAME = "Holiday / Sickness / Public Holiday / Other Leave";
+const HOLIDAY_TASK_NAME = "Holiday";
+
+// Unlike branch work, holiday time always goes under the same fixed org project/task,
+// so this is resolved by name rather than prompted for.
+export async function getHolidayAssignment(client: MyHoursClient): Promise<BranchAssignment> {
+    const projects = await getProjectsCached(client);
+    const project = projects.find(p => p.name.toLowerCase() === HOLIDAY_PROJECT_NAME.toLowerCase());
+    if (!project) {
+        throw new Error(`Could not find a "${HOLIDAY_PROJECT_NAME}" project in your active MyHours projects.`);
+    }
+    const tasks = await getTasksCached(client, project.id);
+    let task = tasks.find(t => t.name.toLowerCase() === HOLIDAY_TASK_NAME.toLowerCase());
+    if (!task) {
+        task = await client.createProjectTask(project.id, HOLIDAY_TASK_NAME);
+        tasksCache.get(project.id)?.push(task);
+    }
+    return { projectId: project.id, projectName: project.name, taskId: task.id, taskName: task.name };
+}
+
 export function branchAssignmentKey(repoPath: string, branch: string): string {
     return `${repoPath}::${branch}`;
+}
+
+// Looks up a branch's assignment without prompting - used by commit-week, which
+// must fail rather than ask, if summarise-week hasn't been run to completion yet.
+export async function getCachedAssignment(repoPath: string, branch: string): Promise<BranchAssignment|'skip'|undefined> {
+    const storage = await getStorage();
+    return storage?.branchAssignments?.[branchAssignmentKey(repoPath, branch)];
 }
 
 function countBy<T>(values: T[], keyOf: (value: T) => number): Map<number, number> {

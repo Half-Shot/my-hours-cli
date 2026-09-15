@@ -2,11 +2,15 @@
   "name": "my-hours-cli",
   "version": "1.0.0",
   "main": "src/cli.ts",
+  "bin": {
+    "my-hours": "lib/cli.js"
+  },
   "type": "module",
   "license": "MIT",
   "dependencies": {
     "commander": "^15.0.0",
     "luxon": "^3.7.2",
+    "node-ical": "^0.27.1",
     "prompts": "^2.4.2",
     "typescript": "^7.0.2"
   },
@@ -17,7 +21,7 @@
   },
   "scripts": {
     "cli": "node --enable-source-maps lib/cli.js",
-    "build": "tsc"
+    "build": "tsc && chmod +x lib/cli.js"
   },
   "packageManager": "pnpm@11.20.0+sha512.9a6f330a95b66446ea088faf1521405a8a01f07fde7124cc9958dfed52d4bb436737e65b08f85f37b46fcba375092558ac51262b816844b22f63406ed166bfee"
 }
